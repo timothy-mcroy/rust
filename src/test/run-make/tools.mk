@@ -5,7 +5,7 @@ HOST_RPATH_ENV = \
 TARGET_RPATH_ENV = \
     $(LD_LIB_PATH_ENVVAR)="$(TMPDIR):$(TARGET_RPATH_DIR):$($(LD_LIB_PATH_ENVVAR))"
 
-BARE_RUSTC := $(HOST_RPATH_ENV) $(RUSTC)
+BARE_RUSTC := $(HOST_RPATH_ENV) '$(RUSTC)'
 RUSTC := $(BARE_RUSTC) --out-dir $(TMPDIR) -L $(TMPDIR) $(RUSTFLAGS)
 #CC := $(CC) -L $(TMPDIR)
 HTMLDOCCK := $(PYTHON) $(S)/src/etc/htmldocck.py
@@ -59,7 +59,7 @@ NATIVE_STATICLIB = $(TMPDIR)/$(call NATIVE_STATICLIB_FILE,$(1))
 OUT_EXE=-Fe:`cygpath -w $(TMPDIR)/$(call BIN,$(1))` \
 	-Fo:`cygpath -w $(TMPDIR)/$(1).obj`
 else
-COMPILE_OBJ = $(CC) -c -o $(1) $(2)
+COMPILE_OBJ = $(CC) $(CFLAGS) -c -o $(1) $(2)
 NATIVE_STATICLIB_FILE = lib$(1).a
 NATIVE_STATICLIB = $(call STATICLIB,$(1))
 OUT_EXE=-o $(TMPDIR)/$(1)
@@ -112,16 +112,16 @@ else
 	ar crus $@ $<
 endif
 %.dylib: %.o
-	$(CC) -dynamiclib -Wl,-dylib -o $@ $<
+	$(CC) $(CFLAGS) -dynamiclib -Wl,-dylib -o $@ $<
 %.so: %.o
-	$(CC) -o $@ $< -shared
+	$(CC) $(CFLAGS) -o $@ $< -shared
 
 ifdef IS_MSVC
 %.dll: lib%.o
-	$(CC) $< -link -dll -out:`cygpath -w $@`
+	$(CC) $(CFLAGS) $< -link -dll -out:`cygpath -w $@`
 else
 %.dll: lib%.o
-	$(CC) -o $@ $< -shared
+	$(CC) $(CFLAGS) -o $@ $< -shared
 endif
 
 $(TMPDIR)/lib%.o: %.c

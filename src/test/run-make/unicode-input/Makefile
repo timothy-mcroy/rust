@@ -6,7 +6,7 @@
 
 # FIXME ignore windows
 ifndef IS_WINDOWS
-ifeq ($(RUST_BUILD_STAGE),1)
+ifeq ($(RUST_BUILD_STAGE),stage1)
 DOTEST=
 else
 DOTEST=dotest

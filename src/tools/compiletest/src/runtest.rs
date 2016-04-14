@@ -11,7 +11,7 @@
 use common::Config;
 use common::{CompileFail, ParseFail, Pretty, RunFail, RunPass, RunPassValgrind};
 use common::{Codegen, DebugInfoLldb, DebugInfoGdb, Rustdoc, CodegenUnits};
-use common::{Incremental};
+use common::{Incremental, RunMake};
 use errors::{self, ErrorKind, Error};
 use json;
 use header::TestProps;
@@ -24,7 +24,7 @@ use std::env;
 use std::collections::HashSet;
 use std::fmt;
 use std::fs::{self, File};
-use std::io::BufReader;
+use std::io::{self, BufReader};
 use std::io::prelude::*;
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
@@ -62,6 +62,7 @@ pub fn run(config: Config, testpaths: &TestPaths) {
         Rustdoc => run_rustdoc_test(&config, &props, &testpaths),
         CodegenUnits => run_codegen_units_test(&config, &props, &testpaths),
         Incremental => run_incremental_test(&config, &props, &testpaths),
+        RunMake => run_rmake_test(&config, &props, &testpaths),
     }
 }
 
@@ -1373,6 +1374,7 @@ fn make_compile_args<F>(config: &Config,
         DebugInfoLldb |
         Codegen |
         Rustdoc |
+        RunMake |
         CodegenUnits => {
             // do not use JSON output
         }
@@ -2062,4 +2064,73 @@ fn run_incremental_test(config: &Config, props: &TestProps, testpaths: &TestPath
                 "revision name must begin with rpass, rfail, or cfail");
         }
     }
+}
+
+fn run_rmake_test(config: &Config, _props: &TestProps, testpaths: &TestPaths) {
+    let cwd = env::current_dir().unwrap();
+    let src_root = config.src_base.parent().unwrap().parent().unwrap()
+                                  .parent().unwrap();
+    let src_root = cwd.join(&src_root);
+
+    let tmpdir = cwd.join(output_base_name(config, testpaths));
+    if tmpdir.exists() {
+        aggressive_rm_rf(&tmpdir).unwrap();
+    }
+    fs::create_dir_all(&tmpdir).unwrap();
+
+    let mut cmd = Command::new("make");
+    cmd.current_dir(&testpaths.file)
+       .env("TARGET", &config.target)
+       .env("PYTHON", &config.docck_python)
+       .env("S", src_root)
+       .env("RUST_BUILD_STAGE", &config.stage_id)
+       .env("RUSTC", cwd.join(&config.rustc_path))
+       .env("RUSTDOC", cwd.join(&config.rustdoc_path))
+       .env("TMPDIR", &tmpdir)
+       .env("LD_LIB_PATH_ENVVAR", procsrv::dylib_env_var())
+       .env("HOST_RPATH_DIR", cwd.join(&config.compile_lib_path))
+       .env("TARGET_RPATH_DIR", cwd.join(&config.run_lib_path))
+       .env("CC", &config.cc)
+       .env("CXX", &config.cxx)
+       .env("CFLAGS", &config.cflags)
+       .env("LLVM_COMPONENTS", &config.llvm_components)
+       .env("LLVM_CXXFLAGS", &config.llvm_cxxflags);
+
+    if config.target.contains("msvc") {
+        cmd.env("IS_MSVC", "1");
+    }
+
+    let output = cmd.output().expect("failed to spawn `make`");
+    if !output.status.success() {
+        let res = ProcRes {
+            status: Status::Normal(output.status),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            cmdline: format!("{:?}", cmd),
+        };
+        fatal_proc_rec(None, "make failed", &res);
+    }
+}
+
+fn aggressive_rm_rf(path: &Path) -> io::Result<()> {
+    for e in try!(path.read_dir()) {
+        let entry = try!(e);
+        let path = entry.path();
+        if try!(entry.file_type()).is_dir() {
+            try!(aggressive_rm_rf(&path));
+        } else {
+            // Remove readonly files as well on windows (by default we can't)
+            try!(fs::remove_file(&path).or_else(|e| {
+                if cfg!(windows) && e.kind() == io::ErrorKind::PermissionDenied {
+                    let mut meta = try!(entry.metadata()).permissions();
+                    meta.set_readonly(false);
+                    try!(fs::set_permissions(&path, meta));
+                    fs::remove_file(&path)
+                } else {
+                    Err(e)
+                }
+            }))
+        }
+    }
+    fs::remove_dir(path)
 }
